@@ -1,0 +1,46 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isScheduler() {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'scheduler';
+    }
+
+    // Everyone signed in can read the roster (needed to show names on the
+    // schedule and in the assign-people picker). Only Cloud Functions
+    // (admin SDK, bypasses rules) and the user themself write fcmToken;
+    // role is admin-only and NOT editable by the user.
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.auth.uid == userId
+        && request.resource.data.role == 'unassigned'
+        && request.resource.data.requestedRole in ['general', 'scheduler'];
+      allow update: if isSignedIn() && request.auth.uid == userId
+        && request.resource.data.role == resource.data.role; // can't self-promote
+      allow update: if isScheduler()
+        && request.resource.data.role in ['unassigned', 'scheduler']
+        && request.resource.data.requestedRole in ['general', 'scheduler'];
+    }
+
+    match /activities/{activityId} {
+      allow read: if isSignedIn() &&
+        (isScheduler() || resource.data.get('isPublic', true) == true || request.auth.uid in resource.data.assignedTo);
+      allow create, update, delete: if isScheduler();
+    }
+
+    match /unavailability/{blockId} {
+      allow read: if isSignedIn() && (isScheduler() || resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() &&
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.userId == request.auth.uid;
+    }
+  }
+}
