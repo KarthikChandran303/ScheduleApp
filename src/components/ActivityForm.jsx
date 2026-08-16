@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { DATE_OPTIONS, rangesOverlap } from '../lib/schedule';
+import { DATE_OPTIONS, blocksOverlap } from '../lib/schedule';
 
 const ACTIVITY_COLORS = [
   { value: '#cfe4ff', label: 'Blue' },
@@ -36,8 +36,12 @@ export default function ActivityForm({ initial, day, users, unavailability, onSa
     return unavailability.some(
       (b) =>
         b.userId === userId &&
-        b.day === activityDay &&
-        rangesOverlap(startTime, endTime, b.startTime, b.endTime)
+        blocksOverlap(
+          { day: activityDay, time: startTime },
+          { day: activityDay, time: endTime },
+          { day: b.startDay || b.day, time: b.startTime },
+          { day: b.endDay || b.day, time: b.endTime }
+        )
     );
   }
 

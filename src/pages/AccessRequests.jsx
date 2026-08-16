@@ -43,7 +43,7 @@ export default function AccessRequests() {
   );
 
   const otherUsers = users.filter(
-    (user) => user.role !== 'scheduler' && user.requestStatus !== 'approved' && user.requestStatus !== 'denied'
+    (user) => user.role !== 'scheduler' && user.requestStatus !== 'approved'
   );
 
   const roleLabel = (user) => {

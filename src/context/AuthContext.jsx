@@ -3,6 +3,8 @@ import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  signInAnonymously,
+  sendPasswordResetEmail,
   signOut,
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
@@ -51,8 +53,17 @@ export function AuthProvider({ children }) {
     return cred.user;
   }
 
+  async function guestLogin() {
+    const cred = await signInAnonymously(auth);
+    return cred.user;
+  }
+
   async function logout() {
     await signOut(auth);
+  }
+
+  async function resetPassword(email) {
+    await sendPasswordResetEmail(auth, email);
   }
 
   // Ask for notification permission and save the device's FCM token on the
@@ -79,10 +90,13 @@ export function AuthProvider({ children }) {
     firebaseUser,
     profile,
     isScheduler: profile?.role === 'scheduler',
+    isGuest: !!firebaseUser?.isAnonymous,
     loading: firebaseUser === undefined,
     signup,
     login,
+    guestLogin,
     logout,
+    resetPassword,
     registerPushToken,
   };
 

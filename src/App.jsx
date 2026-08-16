@@ -7,7 +7,7 @@ import Unavailability from './pages/Unavailability';
 import AccessRequests from './pages/AccessRequests';
 
 function Shell({ children }) {
-  const { profile, logout } = useAuth();
+  const { profile, logout, isGuest } = useAuth();
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -17,16 +17,21 @@ function Shell({ children }) {
           <NavLink to="/" end>
             Weekly
           </NavLink>
-          <NavLink to="/unavailable">Unavailable</NavLink>
+          {!isGuest && <NavLink to="/unavailable">Unavailable</NavLink>}
           {profile?.role === 'scheduler' && <NavLink to="/requests">Requests</NavLink>}
         </nav>
         <button className="link-button" onClick={logout}>
-          Sign out
+          {isGuest ? 'Exit guest mode' : 'Sign out'}
         </button>
       </header>
-      {profile?.role === 'unassigned' && (
+      {profile?.role === 'unassigned' && profile?.requestStatus === 'pending' && (
         <div className="banner">
           Your account is view-only for now. An admin will grant scheduling access if needed.
+        </div>
+      )}
+      {isGuest && (
+        <div className="banner">
+          You're browsing as a guest — only the public schedule is visible.
         </div>
       )}
       <main>{children}</main>
@@ -35,12 +40,12 @@ function Shell({ children }) {
 }
 
 export default function App() {
-  const { firebaseUser, loading, registerPushToken } = useAuth();
+  const { firebaseUser, loading, isGuest, registerPushToken } = useAuth();
 
   useEffect(() => {
-    if (firebaseUser) registerPushToken();
+    if (firebaseUser && !isGuest) registerPushToken();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [firebaseUser]);
+  }, [firebaseUser, isGuest]);
 
   if (loading) return <div className="loading-screen">Loading…</div>;
 
@@ -57,8 +62,8 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Schedule />} />
         <Route path="/daily" element={<Schedule view="daily" />} />
-        <Route path="/unavailable" element={<Unavailability />} />
-        <Route path="/requests" element={<AccessRequests />} />
+        <Route path="/unavailable" element={isGuest ? <Navigate to="/" replace /> : <Unavailability />} />
+        <Route path="/requests" element={isGuest ? <Navigate to="/" replace /> : <AccessRequests />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Shell>

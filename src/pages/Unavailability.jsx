@@ -10,7 +10,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
-import { DATE_OPTIONS } from '../lib/schedule';
+import { DATE_OPTIONS, toAbsoluteMinutes } from '../lib/schedule';
 
 export default function Unavailability() {
   const { firebaseUser } = useAuth();
@@ -29,9 +29,7 @@ export default function Unavailability() {
 
   async function handleAdd(e) {
     e.preventDefault();
-    const rangeStart = new Date(`${startDay}T00:00:00`);
-    const rangeEnd = new Date(`${endDay}T00:00:00`);
-    if (rangeEnd < rangeStart || endTime <= startTime) return;
+    if (toAbsoluteMinutes(endDay, endTime) <= toAbsoluteMinutes(startDay, startTime)) return;
 
     await addDoc(collection(db, 'unavailability'), {
       userId: firebaseUser.uid,
@@ -56,48 +54,62 @@ export default function Unavailability() {
     <div className="page">
       <h2>My unavailability</h2>
       <p className="page-subtitle">
-        Mark times you're not available. Schedulers will see a warning if they try to assign you
-        during a block.
+        Mark when you're unavailable. Schedulers get a warning if they assign you then.
       </p>
 
       <form className="unavailability-form" onSubmit={handleAdd}>
-        <div className="form-row">
-          <label>
-            From date
-            <input type="date" value={startDay} onChange={(e) => setStartDay(e.target.value)} required />
-          </label>
-          <label>
-            To date
-            <input type="date" value={endDay} onChange={(e) => setEndDay(e.target.value)} required />
-          </label>
-          <label>
-            From
-            <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
-          </label>
-          <label>
-            To
-            <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
-          </label>
+        <div className="form-row unavailability-range">
+          <fieldset className="field-group">
+            <legend>From</legend>
+            <div className="field-group-inputs">
+              <input type="date" value={startDay} onChange={(e) => setStartDay(e.target.value)} required />
+              <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
+            </div>
+          </fieldset>
+          <span className="field-group-arrow" aria-hidden="true">→</span>
+          <fieldset className="field-group">
+            <legend>To</legend>
+            <div className="field-group-inputs">
+              <input type="date" value={endDay} onChange={(e) => setEndDay(e.target.value)} required />
+              <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
+            </div>
+          </fieldset>
         </div>
         <label>
-          Note (optional)
+          <span className="form-field-label">Note (optional)</span>
           <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. doctor's appointment" />
         </label>
-        <button type="submit">Add block</button>
+        <div className="form-actions">
+          <button type="submit">Add block</button>
+        </div>
       </form>
 
       <ul className="block-list">
-        {sorted.map((b) => (
-          <li key={b.id} className="block-item">
-            <span>
-              <strong>{b.startDay || b.day}</strong>{b.endDay && b.endDay !== b.startDay ? `–${b.endDay}` : ''} {b.startTime}–{b.endTime}
-              {b.note && <span className="block-note"> — {b.note}</span>}
-            </span>
-            <button className="link-button" onClick={() => handleRemove(b.id)}>
-              Remove
-            </button>
-          </li>
-        ))}
+        {sorted.map((b) => {
+          const startDayValue = b.startDay || b.day;
+          const endDayValue = b.endDay || b.day;
+          const isMultiDay = endDayValue !== startDayValue;
+          return (
+            <li key={b.id} className="block-item">
+              <div className="block-item-copy">
+                {isMultiDay ? (
+                  <span className="block-item-date">
+                    {startDayValue} {b.startTime} <span aria-hidden="true">→</span> {endDayValue} {b.endTime}
+                  </span>
+                ) : (
+                  <>
+                    <span className="block-item-date">{startDayValue}</span>
+                    <span className="block-item-time">{b.startTime}–{b.endTime}</span>
+                  </>
+                )}
+                {b.note && <span className="block-note">{b.note}</span>}
+              </div>
+              <button className="icon-button danger" onClick={() => handleRemove(b.id)} aria-label="Remove">
+                Remove
+              </button>
+            </li>
+          );
+        })}
         {sorted.length === 0 && <p className="empty-state">No unavailability blocks yet.</p>}
       </ul>
     </div>

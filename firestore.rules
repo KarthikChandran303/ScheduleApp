@@ -7,21 +7,32 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // Anonymous "guest" sessions (Continue as guest) get read-only access
+    // to the public schedule and never have a users/{uid} profile doc.
+    function isGuest() {
+      return isSignedIn() && request.auth.token.firebase.sign_in_provider == 'anonymous';
+    }
+
+    function isRealUser() {
+      return isSignedIn() && !isGuest();
+    }
+
     function isScheduler() {
-      return isSignedIn() &&
+      return isRealUser() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'scheduler';
     }
 
-    // Everyone signed in can read the roster (needed to show names on the
-    // schedule and in the assign-people picker). Only Cloud Functions
-    // (admin SDK, bypasses rules) and the user themself write fcmToken;
-    // role is admin-only and NOT editable by the user.
+    // Everyone signed in (except guests) can read the roster (needed to show
+    // names on the schedule and in the assign-people picker). Only Cloud
+    // Functions (admin SDK, bypasses rules) and the user themself write
+    // fcmToken; role is admin-only and NOT editable by the user.
     match /users/{userId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() && request.auth.uid == userId
+      allow read: if isRealUser();
+      allow create: if isRealUser() && request.auth.uid == userId
         && request.resource.data.role == 'unassigned'
         && request.resource.data.requestedRole in ['general', 'scheduler'];
-      allow update: if isSignedIn() && request.auth.uid == userId
+      allow update: if isRealUser() && request.auth.uid == userId
         && request.resource.data.role == resource.data.role; // can't self-promote
       allow update: if isScheduler()
         && request.resource.data.role in ['unassigned', 'scheduler']
@@ -35,10 +46,10 @@ service cloud.firestore {
     }
 
     match /unavailability/{blockId} {
-      allow read: if isSignedIn() && (isScheduler() || resource.data.userId == request.auth.uid);
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow update: if isSignedIn() &&
+      allow read: if isRealUser() && (isScheduler() || resource.data.userId == request.auth.uid);
+      allow create: if isRealUser() && request.resource.data.userId == request.auth.uid;
+      allow delete: if isRealUser() && resource.data.userId == request.auth.uid;
+      allow update: if isRealUser() &&
         resource.data.userId == request.auth.uid &&
         request.resource.data.userId == request.auth.uid;
     }

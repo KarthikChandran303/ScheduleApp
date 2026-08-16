@@ -99,6 +99,47 @@ label {
   margin-top: 1rem;
 }
 
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1.25rem 0 0.75rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.auth-guest-button {
+  width: 100%;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--navy);
+  padding: 0.7rem;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.auth-guest-button:hover {
+  background: #fbfcfe;
+  border-color: var(--navy-light);
+}
+
+.auth-forgot-link {
+  align-self: flex-end;
+  padding: 0;
+  font-size: 0.82rem;
+  margin-top: -0.5rem;
+}
+
 .error-text {
   color: var(--danger);
   font-size: 0.85rem;
@@ -122,8 +163,9 @@ label {
 
 .app-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 1rem;
+  gap: 0.75rem 1rem;
   padding: 1rem 1.25rem;
   background: var(--navy);
   color: white;
@@ -136,7 +178,8 @@ label {
 
 .app-header nav {
   display: flex;
-  gap: 1rem;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
   flex: 1;
 }
 
@@ -337,6 +380,12 @@ label {
   overflow-x: auto;
   margin-bottom: 1.25rem;
   padding-bottom: 0.2rem;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.day-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .day-tab {
@@ -370,6 +419,7 @@ label {
 
 .schedule-tools {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.55rem;
   margin-left: auto;
@@ -584,6 +634,7 @@ label {
 }
 
 .calendar-board {
+  position: relative;
   background: white;
   border: 1px solid var(--border);
   border-radius: 16px;
@@ -593,6 +644,37 @@ label {
 
 .calendar-board.is-hidden {
   display: none;
+}
+
+.no-assignments-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 2rem;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.9);
+  pointer-events: none;
+}
+
+.no-assignments-overlay p {
+  color: var(--muted);
+  font-size: 0.95rem;
+  max-width: 22rem;
+}
+
+.no-assignments-overlay button {
+  pointer-events: auto;
+  border: none;
+  background: var(--navy);
+  color: white;
+  font-weight: 600;
+  padding: 0.6rem 1.1rem;
+  border-radius: 10px;
 }
 
 .calendar-grid-header {
@@ -636,6 +718,17 @@ label {
 .calendar-day-column {
   display: flex;
   flex-direction: column;
+}
+
+.calendar-time-column,
+.time-column-label {
+  position: sticky;
+  left: 0;
+  z-index: 6;
+}
+
+.time-column-label {
+  background: #f5f7fb;
 }
 
 .calendar-time-column {
@@ -746,6 +839,16 @@ label {
   left: 0.3rem;
   right: 0.3rem;
   z-index: 3;
+}
+
+/* Schedulers can drag activities on touch devices via long-press; disabling
+   native touch scrolling on the activity itself makes that gesture reliable. */
+.calendar-activity.is-touch-draggable {
+  touch-action: none;
+}
+
+.calendar-activity.is-dragging {
+  opacity: 0.6;
 }
 
 .color-presets {
@@ -1056,7 +1159,7 @@ label {
   box-shadow: 0 10px 24px rgba(31, 42, 68, 0.18);
   color: var(--ink);
   opacity: 0;
-  pointer-events: auto;
+  pointer-events: none;
   transform: translateX(-4px);
   transition: opacity 0.15s ease, transform 0.15s ease;
   z-index: 100;
@@ -1064,6 +1167,7 @@ label {
 
 .calendar-activity-tooltip.is-open {
   opacity: 1;
+  pointer-events: auto;
   transform: translateX(0);
 }
 
@@ -1158,10 +1262,6 @@ label {
   color: var(--danger);
 }
 
-  .calendar-grid-header,
-  .calendar-grid-body {
-    min-width: 900px;
-  }
 .activity-list.agenda-list {
   display: none;
 }
@@ -1401,6 +1501,138 @@ label {
   }
 }
 
+/* Bigger touch targets for coarse-pointer (touch) devices, and reposition
+   the activity action popup so it doesn't require horizontal scrolling to reach. */
+@media (pointer: coarse) {
+  .activity-resize-handle {
+    opacity: 0.5;
+    height: 20px;
+  }
+
+  .activity-resize-handle.top {
+    top: -8px;
+  }
+
+  .activity-resize-handle.bottom {
+    bottom: -8px;
+  }
+
+  .icon-button {
+    padding: 0.45rem 0.7rem;
+    font-size: 0.85rem;
+  }
+
+  .activity-action {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8rem;
+  }
+
+  .modal-close {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .calendar-activity-tooltip {
+    left: 0;
+    top: calc(100% + 0.4rem);
+    transform: translateY(-4px);
+  }
+
+  .calendar-activity-tooltip.is-open {
+    transform: translateY(0);
+  }
+
+  .auth-screen {
+    padding: 1rem;
+  }
+
+  .auth-card {
+    padding: 1.5rem;
+  }
+
+  .schedule-tools {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+    margin-left: 0;
+    padding: 0;
+    border: none;
+    background: none;
+  }
+
+  .calendar-settings-wrap {
+    justify-content: space-between;
+    width: 100%;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: white;
+  }
+
+  .schedule-visibility-toggle {
+    width: 100%;
+    justify-content: flex-start;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: white;
+    padding: 0.5rem 0.65rem;
+  }
+
+  .schedule-tools .primary-button {
+    width: 100%;
+    padding: 0.65rem 0.8rem;
+    font-size: 0.85rem;
+  }
+
+  /* Compact, scrollable pill-tab nav instead of wrapping underlined links. */
+  .app-header {
+    padding: 0.75rem 1rem;
+    gap: 0.5rem 0.75rem;
+  }
+
+  .app-brand {
+    order: 1;
+  }
+
+  .app-header .link-button {
+    order: 2;
+    white-space: nowrap;
+  }
+
+  .app-header nav {
+    order: 3;
+    flex-basis: 100%;
+    flex-wrap: nowrap;
+    gap: 0.4rem;
+    overflow-x: auto;
+    padding-bottom: 0.1rem;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .app-header nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .app-header nav a {
+    flex: 0 0 auto;
+    padding: 0.4rem 0.85rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.1);
+    border-bottom: none;
+    white-space: nowrap;
+    font-size: 0.82rem;
+  }
+
+  .app-header nav a.active {
+    background: rgba(255, 255, 255, 0.22);
+    color: white;
+  }
+}
+
 @media (max-width: 640px) {
   .calendar-board {
     overflow-x: auto;
@@ -1411,9 +1643,6 @@ label {
   .calendar-grid-header,
   .calendar-grid-body {
     min-width: 900px;
-  }
-  .activity-list.agenda-list:not(.is-visible) {
-    display: flex;
   }
 
   .modal-backdrop {
@@ -1438,6 +1667,15 @@ label {
 
   .form-row {
     gap: 0.4rem;
+  }
+
+  .unavailability-range {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .field-group-arrow {
+    display: none;
   }
 
   input,
@@ -1502,7 +1740,8 @@ label {
 }
 
 .activity-form > label,
-.activity-form .form-row label {
+.activity-form .form-row label,
+.unavailability-form > label {
   position: relative;
   gap: 0.45rem;
   padding: 1.05rem 0.9rem 0.65rem;
@@ -1526,7 +1765,8 @@ label {
 }
 
 .activity-form > label:focus-within,
-.activity-form .form-row label:focus-within {
+.activity-form .form-row label:focus-within,
+.unavailability-form > label:focus-within {
   border-color: rgba(46, 60, 94, 0.55);
   box-shadow: 0 0 0 3px rgba(46, 60, 94, 0.1);
 }
@@ -1534,7 +1774,8 @@ label {
 .activity-form > label > input,
 .activity-form > label > textarea,
 .activity-form .form-row label > input,
-.activity-form .form-row label > select {
+.activity-form .form-row label > select,
+.unavailability-form > label > input {
   width: 100%;
   padding: 0.55rem 0;
   border: 0;
@@ -1556,6 +1797,66 @@ label {
 
 .form-row label {
   flex: 1;
+}
+
+.unavailability-range {
+  align-items: center;
+}
+
+.field-group {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fbfcfe;
+  padding: 0.6rem 0.9rem 0.8rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.field-group:focus-within {
+  border-color: rgba(46, 60, 94, 0.55);
+  box-shadow: 0 0 0 3px rgba(46, 60, 94, 0.1);
+}
+
+.field-group legend {
+  padding: 0 0.35rem;
+  margin-left: -0.35rem;
+  color: var(--navy);
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.field-group-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.field-group-inputs input {
+  flex: 1 1 auto;
+  min-width: 128px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  padding: 0.5rem 0 0;
+  background: transparent;
+  color: var(--ink);
+  outline: none;
+}
+
+.field-group-inputs input[type='date'] {
+  flex: 1.3 1 140px;
+}
+
+.field-group-inputs input[type='time'] {
+  flex: 1 1 128px;
+}
+
+.field-group-arrow {
+  flex: 0 0 auto;
+  align-self: center;
+  margin-top: 0.5rem;
+  color: var(--muted);
+  font-size: 1.1rem;
 }
 
 .assign-list {
@@ -1738,13 +2039,43 @@ label {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 1rem;
   background: white;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.6rem 0.9rem;
+  border-left: 4px solid var(--navy-light);
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
   font-size: 0.9rem;
+  box-shadow: 0 3px 10px rgba(31, 42, 68, 0.05);
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.block-item:hover {
+  box-shadow: 0 6px 16px rgba(31, 42, 68, 0.1);
+  transform: translateY(-1px);
+}
+
+.block-item-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.block-item-date {
+  color: var(--navy);
+  font-weight: 800;
+}
+
+.block-item-time {
+  color: var(--ink);
+  font-size: 0.85rem;
 }
 
 .block-note {
   color: var(--muted);
+  font-size: 0.82rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

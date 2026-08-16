@@ -21,7 +21,7 @@ const ZOOM_PRESETS = { compact: 48, comfortable: 72, detailed: 96 };
 const GRID_INTERVALS = [15, 30, 60];
 
 export default function Schedule({ view = 'weekly' }) {
-  const { firebaseUser, isScheduler } = useAuth();
+  const { firebaseUser, isScheduler, isGuest } = useAuth();
   const isDailyView = view === 'daily';
   const [zoom, setZoom] = useState(() => localStorage.getItem('schedule-zoom') || 'comfortable');
   const [gridInterval, setGridInterval] = useState(() => Number(localStorage.getItem('schedule-grid-interval') || 30));
@@ -46,9 +46,14 @@ export default function Schedule({ view = 'weekly' }) {
   const [resizingState, setResizingState] = useState(null); // { id, startTime, endTime }
   const resizingStateRef = useRef(null);
   const resizeSessionRef = useRef(null);
+  const touchDragCandidateRef = useRef(null);
   const suppressActivityClick = useRef(false);
   const gridBodyRef = useRef(null);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const viewingRef = useRef(null);
+  const actionActivityIdRef = useRef(null);
+  const activitiesRef = useRef([]);
+  const isSchedulerRef = useRef(false);
 
   useEffect(() => localStorage.setItem('schedule-zoom', zoom), [zoom]);
   useEffect(() => localStorage.setItem('schedule-grid-interval', String(gridInterval)), [gridInterval]);
@@ -69,6 +74,8 @@ export default function Schedule({ view = 'weekly' }) {
     if (!firebaseUser) return undefined;
     const activityQueries = isScheduler
       ? [query(collection(db, 'activities'))]
+      : isGuest
+      ? [query(collection(db, 'activities'), where('isPublic', '==', true))]
       : [
           query(collection(db, 'activities'), where('assignedTo', 'array-contains', firebaseUser.uid)),
           query(collection(db, 'activities'), where('isPublic', '==', true)),
@@ -88,19 +95,24 @@ export default function Schedule({ view = 'weekly' }) {
           updateActivityState();
         })
       ),
-      onSnapshot(query(collection(db, 'users')), (snap) =>
-        setUsers(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
-      ),
-      onSnapshot(
-        isScheduler
-          ? query(collection(db, 'unavailability'))
-          : query(collection(db, 'unavailability'), where('userId', '==', firebaseUser.uid)),
-        (snap) =>
-        setUnavailability(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
-      ),
+      // Guests have no Firestore access to the roster or unavailability data.
+      ...(isGuest
+        ? []
+        : [
+            onSnapshot(query(collection(db, 'users')), (snap) =>
+              setUsers(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+            ),
+            onSnapshot(
+              isScheduler
+                ? query(collection(db, 'unavailability'))
+                : query(collection(db, 'unavailability'), where('userId', '==', firebaseUser.uid)),
+              (snap) =>
+              setUnavailability(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+            ),
+          ]),
     ];
     return () => unsubs.forEach((u) => u());
-  }, [firebaseUser, isScheduler, showPublicSchedule]);
+  }, [firebaseUser, isScheduler, isGuest, showPublicSchedule]);
 
   // Update current time every minute
   useEffect(() => {
@@ -112,9 +124,14 @@ export default function Schedule({ view = 'weekly' }) {
 
   const visibleActivities = isScheduler
     ? activities
+    : isGuest
+    ? activities.filter((activity) => activity.isPublic !== false)
     : activities.filter((activity) =>
         activity.assignedTo.includes(firebaseUser.uid) || (showPublicSchedule && activity.isPublic !== false)
       );
+
+  const hasAnyAssignedActivity =
+    isScheduler || isGuest ? true : activities.some((activity) => activity.assignedTo.includes(firebaseUser.uid));
 
   const dayActivities = visibleActivities
     .filter((a) => a.day === activeDay)
@@ -168,9 +185,45 @@ export default function Schedule({ view = 'weekly' }) {
   }
 
   async function handleDelete(activity) {
-    if (!confirm(`Delete "${activity.title}"?`)) return;
     await deleteDoc(doc(db, 'activities', activity.id));
   }
+
+  // Update refs with current state for use in event listeners
+  useEffect(() => {
+    viewingRef.current = viewing;
+    actionActivityIdRef.current = actionActivityId;
+    activitiesRef.current = activities;
+    isSchedulerRef.current = isScheduler;
+  }, [viewing, actionActivityId, activities, isScheduler]);
+
+  // Handle Delete key press to instantly delete viewed/selected activity (set up once)
+  useEffect(() => {
+    const handleKeyPress = async (event) => {
+      // macOS keyboards send "Backspace" for the key labeled "delete"
+      const isDeleteKey = event.key === 'Delete' || event.key === 'Backspace';
+      if (isDeleteKey && isSchedulerRef.current) {
+        const activeTag = document.activeElement?.tagName;
+        if (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT') return;
+        let activityToDelete = null;
+        if (viewingRef.current) {
+          activityToDelete = viewingRef.current;
+          setViewing(null);
+        } else if (actionActivityIdRef.current) {
+          activityToDelete = activitiesRef.current.find((a) => a.id === actionActivityIdRef.current);
+          setActionActivityId(null);
+        }
+        if (activityToDelete) {
+          try {
+            await deleteDoc(doc(db, 'activities', activityToDelete.id));
+          } catch (error) {
+            console.error('Failed to delete activity:', error);
+          }
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, []); // Empty dependency array - listener is stable
 
   async function handleDrop(dateValue, slotStart) {
     if (!draggedId) return;
@@ -222,6 +275,147 @@ export default function Schedule({ view = 'weekly' }) {
     return minutesToTime(
       Math.min(maxStartMinutes, Math.max(CALENDAR_START_MINUTES, toMinutes(firstConflict.endTime)))
     );
+  }
+
+  // Given cursor/touch coordinates, resolve which day column and time-of-day
+  // they're over, purely from the grid body's bounding box (no need to hit
+  // -test individual slot elements). Shared by mouse drag-over and touch drag.
+  function computeDragTarget(clientX, clientY) {
+    if (!gridBodyRef.current) return null;
+    const gridBounds = gridBodyRef.current.getBoundingClientRect();
+    const timeColumnWidth = 70;
+    const cursorX = clientX - gridBounds.left - timeColumnWidth;
+    const columnCount = visibleDateOptions.length;
+    const availableWidth = gridBounds.width - timeColumnWidth;
+    const columnWidth = availableWidth / columnCount;
+    const columnIndex = Math.max(0, Math.min(columnCount - 1, Math.floor(cursorX / columnWidth)));
+    const targetDate = visibleDateOptions[columnIndex]?.value;
+    if (!targetDate) return null;
+
+    const relativeY = clientY - gridBounds.top;
+    const rawMinutesFromStart = (relativeY / slotHeight) * gridInterval;
+    return { targetDate, rawMinutesFromStart };
+  }
+
+  function updateDragHighlightFromPoint(clientX, clientY, draggedActivity) {
+    const target = computeDragTarget(clientX, clientY);
+    if (!target) return;
+    const draggedDuration = draggedActivity
+      ? toMinutes(draggedActivity.endTime) - toMinutes(draggedActivity.startTime)
+      : gridInterval;
+    const proposedStart = CALENDAR_START_MINUTES + target.rawMinutesFromStart - dragOffsetMinutes.current;
+    const snappedStart = snapToNearestQuarter(proposedStart);
+    const maxStartMinutes = Math.max(CALENDAR_START_MINUTES, CALENDAR_END_MINUTES - draggedDuration);
+    const dropStart = Math.max(CALENDAR_START_MINUTES, Math.min(maxStartMinutes, snappedStart));
+    const availableStart = getAvailableDropStart(
+      target.targetDate,
+      minutesToTime(dropStart),
+      draggedDuration,
+      draggedActivity?.id
+    );
+    const nextHighlight = `${target.targetDate}-${availableStart}`;
+    dragHighlightCellRef.current = nextHighlight;
+    setDragHighlightCell(nextHighlight);
+  }
+
+  // Touch/pen dragging: HTML5 drag-and-drop isn't reliable on touch devices,
+  // so activities use a long-press (to distinguish from scrolling) followed
+  // by pointer-move tracking, mirroring the mouse drag-and-drop behavior.
+  const TOUCH_DRAG_HOLD_MS = 250;
+  const TOUCH_DRAG_MOVE_TOLERANCE = 10;
+
+  function handleTouchDragStart(event, activity) {
+    if (event.pointerType === 'mouse') return;
+    if (!isScheduler || resizingStateRef.current) return;
+    const element = event.currentTarget;
+    const activityBounds = element.getBoundingClientRect();
+    const candidate = {
+      pointerId: event.pointerId,
+      activity,
+      element,
+      startX: event.clientX,
+      startY: event.clientY,
+      offsetY: event.clientY - activityBounds.top,
+      armed: false,
+      timer: null,
+    };
+    touchDragCandidateRef.current = candidate;
+    candidate.timer = window.setTimeout(() => {
+      if (touchDragCandidateRef.current !== candidate) return;
+      candidate.armed = true;
+      try {
+        element.setPointerCapture?.(event.pointerId);
+      } catch {
+        // Ignore — some browsers reject capture for edge cases; dragging
+        // still works via the window-level pointermove/up fallback below.
+      }
+      const durationMinutes = toMinutes(activity.endTime) - toMinutes(activity.startTime);
+      dragOffsetMinutes.current = Math.min(
+        durationMinutes,
+        Math.max(0, (candidate.offsetY / slotHeight) * gridInterval)
+      );
+      setActionActivityId(null);
+      setViewing(null);
+      suppressActivityClick.current = true;
+      setDraggedId(activity.id);
+    }, TOUCH_DRAG_HOLD_MS);
+  }
+
+  function handleTouchDragMove(event) {
+    const candidate = touchDragCandidateRef.current;
+    if (!candidate || candidate.pointerId !== event.pointerId) return;
+    if (!candidate.armed) {
+      const dx = event.clientX - candidate.startX;
+      const dy = event.clientY - candidate.startY;
+      if (Math.abs(dx) > TOUCH_DRAG_MOVE_TOLERANCE || Math.abs(dy) > TOUCH_DRAG_MOVE_TOLERANCE) {
+        clearTimeout(candidate.timer);
+        touchDragCandidateRef.current = null;
+      }
+      return;
+    }
+    event.preventDefault();
+    updateDragHighlightFromPoint(event.clientX, event.clientY, candidate.activity);
+  }
+
+  function handleTouchDragEnd(event) {
+    const candidate = touchDragCandidateRef.current;
+    if (!candidate || candidate.pointerId !== event.pointerId) return;
+    touchDragCandidateRef.current = null;
+    clearTimeout(candidate.timer);
+    if (!candidate.armed) return;
+    try {
+      candidate.element.releasePointerCapture?.(event.pointerId);
+    } catch {
+      // Ignore — the pointer may already be inactive by the time we release it.
+    }
+    window.setTimeout(() => {
+      suppressActivityClick.current = false;
+    }, 100);
+    const highlightStr = dragHighlightCellRef.current;
+    if (highlightStr) {
+      const dashIndex = highlightStr.lastIndexOf('-');
+      handleDrop(highlightStr.substring(0, dashIndex), highlightStr.substring(dashIndex + 1));
+    } else {
+      setDraggedId(null);
+      setDragHighlightCell(null);
+      dragHighlightCellRef.current = null;
+      dragOffsetMinutes.current = 0;
+    }
+  }
+
+  function handleTouchDragCancel(event) {
+    const candidate = touchDragCandidateRef.current;
+    if (!candidate || candidate.pointerId !== event.pointerId) return;
+    touchDragCandidateRef.current = null;
+    clearTimeout(candidate.timer);
+    if (!candidate.armed) return;
+    setDraggedId(null);
+    setDragHighlightCell(null);
+    dragHighlightCellRef.current = null;
+    dragOffsetMinutes.current = 0;
+    window.setTimeout(() => {
+      suppressActivityClick.current = false;
+    }, 100);
   }
 
   async function handleResizeActivity(activityId, edge, newTime) {
@@ -377,7 +571,7 @@ export default function Schedule({ view = 'weekly' }) {
             </div>
           )}
         </div>
-        {!isScheduler && (
+        {!isScheduler && !isGuest && (
           <label className="schedule-visibility-toggle">
             <input
               type="checkbox"
@@ -438,18 +632,20 @@ export default function Schedule({ view = 'weekly' }) {
               <button type="button" className="modal-close" aria-label="Close dialog" onClick={() => setViewing(null)}>×</button>
             </div>
             <div className="view-detail"><strong>When</strong><span>{viewing.day} · {viewing.startTime}–{viewing.endTime}</span></div>
-            <div className="view-detail view-people-detail">
-              <strong>People</strong>
-              <div className="view-people-list">
-                {viewing.assignedTo.length === 0 && <span>Unassigned</span>}
-                {viewing.assignedTo.map((id) => (
-                  <div key={id} className="view-person">
-                    <strong>{usersById[id]?.name || 'Unknown'}</strong>
-                    {viewing.personNotes?.[id] && <span>{viewing.personNotes[id]}</span>}
-                  </div>
-                ))}
+            {!isGuest && (
+              <div className="view-detail view-people-detail">
+                <strong>People</strong>
+                <div className="view-people-list">
+                  {viewing.assignedTo.length === 0 && <span>Unassigned</span>}
+                  {viewing.assignedTo.map((id) => (
+                    <div key={id} className="view-person">
+                      <strong>{usersById[id]?.name || 'Unknown'}</strong>
+                      {viewing.personNotes?.[id] && <span>{viewing.personNotes[id]}</span>}
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
             {viewing.venue && <div className="view-detail"><strong>Venue</strong><span>{viewing.venue}</span></div>}
             {viewing.description && <div className="view-detail view-description"><strong>Description</strong><span>{viewing.description}</span></div>}
             <div className="form-actions">
@@ -461,6 +657,14 @@ export default function Schedule({ view = 'weekly' }) {
       )}
 
       <div className={`calendar-board ${isDailyView ? 'daily-view' : ''} ${scheduleLayout === 'agenda' ? 'is-hidden' : ''}`} style={{ '--slot-height': `${slotHeight}px` }} role="grid" aria-label={`${isDailyView ? 'Daily' : 'Weekly'} schedule calendar`}>
+        {!showPublicSchedule && !hasAnyAssignedActivity && (
+          <div className="no-assignments-overlay">
+            <p>You haven't been assigned any activities yet.</p>
+            <button type="button" onClick={() => setShowPublicSchedule(true)}>
+              View public schedule
+            </button>
+          </div>
+        )}
         <div className="calendar-grid-header">
           <div className="time-column-label">Time</div>
           {visibleDateOptions.map((dateOption) => (
@@ -635,12 +839,12 @@ export default function Schedule({ view = 'weekly' }) {
                       const durationMinutes = endMinutes - startMinutes;
                       const heightPx = (durationMinutes / gridInterval) * slotHeight;
                       const activityTopPx = ((startMinutes - CALENDAR_START_MINUTES) / gridInterval) * slotHeight;
-                      const showAssignees = durationMinutes >= 45;
+                      const showAssignees = durationMinutes >= 45 && !isGuest;
 
                       return (
                         <div
                           key={activity.id}
-                          className={`calendar-activity ${actionActivityId === activity.id ? 'is-selected' : ''} ${draggedId === activity.id ? 'is-dragging' : ''} ${isPastActivity(displayActivity, dateOption.value) ? 'is-past' : ''} ${resizingId === activity.id ? 'is-resizing' : ''}`}
+                          className={`calendar-activity ${isScheduler ? 'is-touch-draggable' : ''} ${actionActivityId === activity.id ? 'is-selected' : ''} ${draggedId === activity.id ? 'is-dragging' : ''} ${isPastActivity(displayActivity, dateOption.value) ? 'is-past' : ''} ${resizingId === activity.id ? 'is-resizing' : ''}`}
                           style={{
                             height: `${heightPx}px`,
                             top: `${activityTopPx}px`,
@@ -670,12 +874,25 @@ export default function Schedule({ view = 'weekly' }) {
                             dragHighlightCellRef.current = null;
                             dragOffsetMinutes.current = 0;
                           }}
-                          onPointerMove={handleResizePointerMove}
-                          onPointerUp={finishResize}
+                          onPointerDown={(event) => handleTouchDragStart(event, activity)}
+                          onPointerMove={(event) => {
+                            handleResizePointerMove(event);
+                            handleTouchDragMove(event);
+                          }}
+                          onPointerUp={(event) => {
+                            finishResize(event);
+                            handleTouchDragEnd(event);
+                          }}
+                          onPointerCancel={handleTouchDragCancel}
                           onClick={() => {
-                            if (!resizingId && !suppressActivityClick.current) {
-                              setActionActivityId((currentId) => currentId === activity.id ? null : activity.id);
+                            if (resizingId || suppressActivityClick.current) return;
+                            if (!isScheduler) {
+                              // General users and guests can only ever "View" anyway,
+                              // so skip straight to the details dialog.
+                              setViewing(activity);
+                              return;
                             }
+                            setActionActivityId((currentId) => currentId === activity.id ? null : activity.id);
                           }}
                         >
                           {isScheduler && (
@@ -760,7 +977,9 @@ export default function Schedule({ view = 'weekly' }) {
               <div className="activity-time"><span aria-hidden="true">◷</span>{activity.startTime}–{activity.endTime}</div>
               <div className="activity-body">
                 <div className="activity-title">{activity.title}</div>
-                <div className="activity-people activity-meta-row"><span aria-hidden="true">♙</span>{assignedNames.join(', ') || 'Unassigned'}</div>
+                {!isGuest && (
+                  <div className="activity-people activity-meta-row"><span aria-hidden="true">♙</span>{assignedNames.join(', ') || 'Unassigned'}</div>
+                )}
                 {activity.venue && <div className="activity-venue activity-meta-row"><span aria-hidden="true">⌖</span>{activity.venue}</div>}
                 {activity.description && <div className="activity-description activity-meta-row"><span aria-hidden="true">▤</span>{activity.description}</div>}
                 {conflicts.length > 0 && (

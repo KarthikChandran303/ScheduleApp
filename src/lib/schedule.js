@@ -65,13 +65,40 @@ export function rangesOverlap(aStart, aEnd, bStart, bEnd) {
   return toMinutes(aStart) < toMinutes(bEnd) && toMinutes(bStart) < toMinutes(aEnd);
 }
 
+// "YYYY-MM-DD" -> a whole-day integer, so (day, time) pairs can be combined
+// into one absolute, comparable number of minutes.
+function dayToDayIndex(dayStr) {
+  const [y, m, d] = dayStr.split('-').map(Number);
+  return Math.floor(Date.UTC(y, m - 1, d) / 86400000);
+}
+
+// Combine a "YYYY-MM-DD" day and "HH:MM" time into one absolute minute count,
+// so a block spanning multiple days can be treated as a single continuous
+// span (start date+time through end date+time) instead of a daily window.
+export function toAbsoluteMinutes(dayStr, timeStr) {
+  return dayToDayIndex(dayStr) * 1440 + toMinutes(timeStr);
+}
+
+// An unavailability block is a single continuous span from
+// (startDay, startTime) through (endDay, endTime) — e.g. "Fri 5pm through
+// Mon 9am" — not a recurring daily window. Single-day blocks (legacy `day`
+// field, or startDay === endDay) naturally collapse to that one window.
+export function blocksOverlap(aStart, aEnd, bStart, bEnd) {
+  return (
+    toAbsoluteMinutes(aStart.day, aStart.time) < toAbsoluteMinutes(bEnd.day, bEnd.time) &&
+    toAbsoluteMinutes(bStart.day, bStart.time) < toAbsoluteMinutes(aEnd.day, aEnd.time)
+  );
+}
+
 // Given an activity and a list of a user's unavailability blocks, return the
-// blocks (if any) that overlap it on the same day.
+// blocks (if any) that overlap it as a continuous start->end span.
 export function findConflicts(activity, unavailabilityBlocks) {
-  return unavailabilityBlocks.filter(
-    (b) =>
-      activity.day >= (b.startDay || b.day) &&
-      activity.day <= (b.endDay || b.day) &&
-      rangesOverlap(activity.startTime, activity.endTime, b.startTime, b.endTime)
+  return unavailabilityBlocks.filter((b) =>
+    blocksOverlap(
+      { day: activity.day, time: activity.startTime },
+      { day: activity.day, time: activity.endTime },
+      { day: b.startDay || b.day, time: b.startTime },
+      { day: b.endDay || b.day, time: b.endTime }
+    )
   );
 }
